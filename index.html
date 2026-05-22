@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pelacak Paket Data</title>
+    <link rel="manifest" href="manifest.json">
+    <style>
+        :root {
+            --primary: #0056b3;
+            --bg-color: #f4f7f6;
+            --card-bg: #ffffff;
+            --highlight: #e74c3c;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: #333;
+            padding: 20px;
+            max-width: 500px;
+            margin: 0 auto;
+        }
+        .card {
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        h2 { text-align: center; color: var(--primary); margin-top: 0; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 0.9em; }
+        input { 
+            width: 100%; 
+            padding: 10px; 
+            border: 1px solid #ccc; 
+            border-radius: 6px; 
+            box-sizing: border-box; 
+            font-size: 1em;
+        }
+        button {
+            width: 100%;
+            padding: 12px;
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 1em;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        button:hover { background-color: #004494; }
+        
+        /* Calendar Styles */
+        #calendar-wrapper { display: none; text-align: center;}
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th { background-color: #eee; padding: 8px; font-size: 0.8em; }
+        td { padding: 12px; text-align: center; border: 1px solid #eee; }
+        .highlight-date {
+            background-color: var(--highlight);
+            color: white;
+            border-radius: 50%;
+            font-weight: bold;
+            display: inline-block;
+            width: 30px;
+            height: 30px;
+            line-height: 30px;
+        }
+        .result-text { font-weight: bold; color: var(--highlight); margin-bottom: 10px;}
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <h2>Pelacak Paket Data</h2>
+        <div class="form-group">
+            <label for="simNumber">No Kartu SIM</label>
+            <input type="text" id="simNumber" placeholder="Contoh: 081234567890" required>
+        </div>
+        <div class="form-group">
+            <label for="buyDate">Waktu Pembelian</label>
+            <input type="datetime-local" id="buyDate" required>
+        </div>
+        <div class="form-group">
+            <label for="duration">Durasi (Hari)</label>
+            <input type="number" id="duration" placeholder="Contoh: 30" required min="1">
+        </div>
+        <button onclick="calculateAndSave()">Simpan & Cek Kalender</button>
+    </div>
+
+    <div class="card" id="calendar-wrapper">
+        <div class="result-text" id="expiry-result"></div>
+        <div id="calendar-container"></div>
+    </div>
+
+    <script>
+        // --- 1. Pendaftaran Service Worker ---
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js')
+            .then(() => console.log("Service Worker terdaftar"))
+            .catch(err => console.error("SW Gagal:", err));
+        }
+
+        // Meminta izin notifikasi saat aplikasi dibuka
+        if (Notification.permission !== "granted" && Notification.permission !== "denied") {
+            Notification.requestPermission();
+        }
+
+        // --- 2. Logika Utama ---
+        function calculateAndSave() {
+            const sim = document.getElementById('simNumber').value;
+            const buyDateStr = document.getElementById('buyDate').value;
+            const duration = parseInt(document.getElementById('duration').value);
+
+            if(!sim || !buyDateStr || !duration) {
+                alert("Harap isi semua kolom data!");
+                return;
+            }
+
+            const buyDate = new Date(buyDateStr);
+            // Menambahkan durasi hari (1 hari = 86400000 ms)
+            const expiryDate = new Date(buyDate.getTime() + (duration * 24 * 60 * 60 * 1000));
+
+            // Simpan ke localStorage untuk pengecekan notifikasi saat aplikasi dibuka kembali
+            const data = { sim, expiryDate: expiryDate.toISOString() };
+            localStorage.setItem('paketData', JSON.stringify(data));
+
+            tampilkanHasil(sim, expiryDate);
+            buatKalender(expiryDate);
+            cekNotifikasi();
+        }
+
+        function tampilkanHasil(sim, expiryDate) {
+            document.getElementById('calendar-wrapper').style.display = 'block';
+            const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' };
+            document.getElementById('expiry-result').innerText = 
+                `Paket ${sim} berakhir pada: \n${expiryDate.toLocaleDateString('id-ID', options)}`;
+        }
+
+        // --- 3. Logika Kalender ---
+        function buatKalender(expiryDate) {
+            const year = expiryDate.getFullYear();
+            const month = expiryDate.getMonth();
+            const targetDay = expiryDate.getDate();
+
+            // Mendapatkan hari pertama di bulan tersebut dan total hari
+            const firstDay = new Date(year, month, 1).getDay();
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+            const namaBulan = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+            
+            let html = `<h3>${namaBulan[month]} ${year}</h3>`;
+            html += `<table><tr><th>Min</th><th>Sen</th><th>Sel</th><th>Rab</th><th>Kam</th><th>Jum</th><th>Sab</th></tr><tr>`;
+            
+            let dayCount = 1;
+            for (let i = 0; i < 42; i++) {
+                if (i < firstDay || dayCount > daysInMonth) {
+                    html += `<td></td>`;
+                } else {
+                    if (dayCount === targetDay) {
+                        html += `<td><span class="highlight-date">${dayCount}</span></td>`;
+                    } else {
+                        html += `<td>${dayCount}</td>`;
+                    }
+                    dayCount++;
+                }
+                // Pindah baris setiap hari Sabtu
+                if ((i + 1) % 7 === 0) html += `</tr><tr>`;
+            }
+            html += `</tr></table>`;
+            document.getElementById('calendar-container').innerHTML = html;
+        }
+
+        // --- 4. Logika Notifikasi Lokal ---
+        function cekNotifikasi() {
+            const savedData = JSON.parse(localStorage.getItem('paketData'));
+            if(!savedData) return;
+
+            const expiry = new Date(savedData.expiryDate);
+            const now = new Date();
+            
+            // Batas 1 hari sebelum berakhir
+            const oneDayBefore = new Date(expiry.getTime() - (24 * 60 * 60 * 1000));
+
+            // Jika waktu sekarang melewati "1 hari sebelum" TAPI belum melewati waktu kadaluarsa
+            if(now >= oneDayBefore && now < expiry) {
+                if (Notification.permission === "granted") {
+                    navigator.serviceWorker.ready.then(registration => {
+                        registration.showNotification("Pengingat Paket Data!", {
+                            body: `Paket data untuk nomor ${savedData.sim} akan berakhir besok.`,
+                            icon: "icon.png",
+                            vibrate: [200, 100, 200]
+                        });
+                    });
+                }
+            }
+        }
+
+        // Cek data lama & notifikasi saat aplikasi baru dimuat ulang
+        window.onload = () => {
+            const savedData = JSON.parse(localStorage.getItem('paketData'));
+            if(savedData) {
+                cekNotifikasi();
+            }
+        };
+    </script>
+</body>
+</html>
